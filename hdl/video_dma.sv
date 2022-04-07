@@ -78,63 +78,64 @@ localparam NUM_WORDS_WIDTH = $clog2(NUM_WORDS);
 
 localparam FIFO_ABITS = $clog2(FIFO_DEPTH);
 
-// iresetn is used in AR logic to make sure that we do not issue mem read requests
-// before the clock domain crossing fifo has been fully reset.
+logic       oresetn;
+logic [3:0] oresetn_q;
 
-logic [3:0] oresetn_q, iresetn_q;
-logic oresetn, iresetn;
+logic       iresetn;
+logic [3:0] iresetn_q;
 
-// synchronize oresetn with oclk
-always @(posedge oclk)
+assign pixel_rd = out_axis_tready;
+
+assign out_axis_tvalid = pixel_count < NUM_PIXELS;
+assign out_axis_tdata  = pixel_data;
+assign out_axis_tuser  = !pixel_count;
+
+always_ff @(posedge oclk) begin
     {oresetn, oresetn_q} <= {oresetn_q, resetn};
+end
 
-// synchronize iresetn with clk
-always @(posedge clk)
+always_ff @(posedge clk) begin
     {iresetn, iresetn_q} <= {iresetn_q, oresetn};
+end
 
 // --------------------------------------------------------------
 // Configuration Interface
 // --------------------------------------------------------------
 
 logic [31:0] reg_startaddr;
-logic [31:0] reg_activeframe;
-logic [31:0] reg_resolution;
 
-assign reg_resolution[31:16] = VIDEO_VER_PIXELS, reg_resolution[15:0] = VIDEO_HOR_PIXELS;
-
-assign {cfg_axi_awready, cfg_axi_wready} = {2{resetn && cfg_axi_awvalid && cfg_axi_wvalid && (!cfg_axi_bvalid || cfg_axi_bready)}};
+assign cfg_axi_awready = resetn && cfg_axi_awvalid && (!cfg_axi_bvalid || cfg_axi_bready);
+assign cfg_axi_wready  = resetn && cfg_axi_wvalid  && (!cfg_axi_bvalid || cfg_axi_bready);
 assign cfg_axi_arready = resetn && cfg_axi_arvalid && (!cfg_axi_rvalid || cfg_axi_rready);
 
 always_ff @(posedge clk or negedge resetn)
 begin
     if (!resetn) begin
-        reg_startaddr <= 0;
-        cfg_axi_bvalid <= 0;
-        cfg_axi_rvalid <= 0;
+        reg_startaddr <= {32{1'b0}};
+
+        cfg_axi_bvalid <= 1'b0;
+        cfg_axi_rvalid <= 1'b0;
     end else begin
-        if (cfg_axi_bready) begin
-            cfg_axi_bvalid <= 0;
-        end
-
-        if (cfg_axi_rready) begin
-            cfg_axi_rvalid <= 0;
-        end
-
         if (cfg_axi_awready) begin
-            cfg_axi_bvalid <= 1;
             case (cfg_axi_awaddr)
-                8'h00: reg_startaddr <= cfg_axi_wdata;
+                8'h00:
+                    reg_startaddr <= cfg_axi_wdata;
             endcase
         end
 
         if (cfg_axi_arready) begin
-            cfg_axi_rvalid <= 1;
             case (cfg_axi_araddr)
-                8'h00: cfg_axi_rdata <= reg_startaddr;
-                8'h04: cfg_axi_rdata <= reg_resolution;
-                default: cfg_axi_rdata <= {32{1'b0}};
+                8'h00:
+                    cfg_axi_rdata <= reg_startaddr;
+                8'h04:
+                    cfg_axi_rdata <= {VIDEO_VER_PIXELS[15:0], VIDEO_HOR_PIXELS[15:0]};
+                default:
+                    cfg_axi_rdata <= {32{1'b0}};
             endcase
         end
+
+        cfg_axi_bvalid <= (cfg_axi_bvalid & ~cfg_axi_bready) | cfg_axi_awready;
+        cfg_axi_rvalid <= (cfg_axi_rvalid & ~cfg_axi_rready) | cfg_axi_arready;
     end
 end
 
@@ -143,27 +144,28 @@ end
 // --------------------------------------------------------------
 
 logic [NUM_BURSTS_WIDTH-1:0] ar_burst_count;
-logic [3:0] ar_burst_delay;
-logic ar_flow_ctrl;
+logic                  [3:0] ar_burst_delay;
+logic                        ar_flow_ctrl;
 
-assign mem_axi_arlen = MEM_BURST_LEN-1;
-assign mem_axi_arsize = $clog2(MEM_DATA_WIDTH/8);
-assign mem_axi_arprot = 0;
+assign mem_axi_arlen   = MEM_BURST_LEN - 1;
+assign mem_axi_arsize  = $clog2(MEM_DATA_WIDTH / 8);
+assign mem_axi_arprot  = 0;
 assign mem_axi_arburst = 1;
 
-always @(posedge clk) begin
-    if (ar_burst_delay)
-        ar_burst_delay <= ar_burst_delay-1;
+always_ff @(posedge clk) begin
+    if (ar_burst_delay) begin
+        ar_burst_delay <= ar_burst_delay - 1;
+    end
+
     if (!iresetn || !resetn) begin
         ar_burst_delay <= 0;
         ar_burst_count <= 0;
-        mem_axi_araddr <= 0;
+
+        mem_axi_araddr  <= 0;
         mem_axi_arvalid <= 0;
-        reg_activeframe <= 0;
     end else begin
         if (mem_axi_araddr == 0) begin
             mem_axi_araddr <= reg_startaddr;
-            reg_activeframe <= reg_startaddr;
         end else begin
             if (mem_axi_arready && mem_axi_arvalid) begin
                 mem_axi_arvalid <= 0;
@@ -172,7 +174,7 @@ always @(posedge clk) begin
                 if (ar_flow_ctrl && !mem_axi_arvalid && !ar_burst_delay) begin
                     mem_axi_arvalid <= 1;
 
-                    if (ar_burst_count == NUM_BURSTS-1) begin
+                    if (ar_burst_count == NUM_BURSTS - 1) begin
                         ar_burst_count <= 0;
                     end else begin
                         ar_burst_count <= ar_burst_count + 1;
@@ -180,13 +182,13 @@ always @(posedge clk) begin
 
                     if (ar_burst_count == 0) begin
                         mem_axi_araddr <= reg_startaddr;
-                        reg_activeframe <= reg_startaddr;
+
                         if (!reg_startaddr) begin
                             ar_burst_count <= 0;
                             mem_axi_arvalid <= 0;
                         end
                     end else begin
-                        mem_axi_araddr <= mem_axi_araddr + (MEM_BURST_LEN*MEM_DATA_WIDTH/8);
+                        mem_axi_araddr <= mem_axi_araddr + (MEM_BURST_LEN * MEM_DATA_WIDTH / 8);
                     end
                 end
             end
@@ -194,25 +196,24 @@ always @(posedge clk) begin
     end
 end
 
-
 // --------------------------------------------------------------
 // Memory R channel and flow control
 // --------------------------------------------------------------
 
 logic [NUM_WORDS_WIDTH-1:0] r_word_count;
-logic [FIFO_ABITS:0] requested_words;
+logic        [FIFO_ABITS:0] requested_words;
 
-logic fifo_out_en;
-logic fifo_out_first_word;
+logic                      fifo_out_en;
+logic                      fifo_out_first_word;
 logic [MEM_DATA_WIDTH-1:0] fifo_out_data;
-logic [FIFO_ABITS-1:0] fifo_in_free;
-logic [FIFO_ABITS-1:0] fifo_out_avail;
+logic     [FIFO_ABITS-1:0] fifo_in_free;
+logic     [FIFO_ABITS-1:0] fifo_out_avail;
 
-fifo #(
-    .WIDTH(MEM_DATA_WIDTH+1),
+fifo_async #(
+    .WIDTH(MEM_DATA_WIDTH + 1),
     .DEPTH(FIFO_DEPTH),
     .ABITS(FIFO_ABITS)
-) fifo (
+) fifo_async (
     .in_clk(clk),
     .in_resetn(resetn),
     .in_enable(mem_axi_rvalid && mem_axi_rready),
@@ -240,7 +241,7 @@ begin
 
         if (mem_axi_rvalid && mem_axi_rready) begin
             requested_words = requested_words - 1;
-            r_word_count <= r_word_count == NUM_WORDS-1 ? 0 : r_word_count + 1;
+            r_word_count <= r_word_count == (NUM_WORDS - 1) ? 0 : r_word_count + 1;
         end
 
         ar_flow_ctrl <= requested_words + MEM_BURST_LEN + 4 < fifo_in_free;
@@ -248,35 +249,34 @@ begin
     end
 end
 
-
 // --------------------------------------------------------------
 // Output stream
 // --------------------------------------------------------------
 
-logic [MEM_DATA_WIDTH + 8*BYTES_PER_PIXEL - 9 : 0] outbuf;
-logic [7:0] outbuf_bytes;
-logic outbuf_framestart;
+logic [MEM_DATA_WIDTH+8*BYTES_PER_PIXEL-9:0] outbuf;
+logic                                  [7:0] outbuf_bytes;
+logic                                        outbuf_framestart;
 
-logic pixel_rd;
+logic                      pixel_rd;
 logic [NUM_PIXELS_WIDTH:0] pixel_count;
-logic [23:0] pixel_data;
+logic               [23:0] pixel_data;
 
-always @(posedge oclk or negedge oresetn)
+always_ff @(posedge oclk or negedge oresetn)
 begin
     if (!oresetn) begin
         outbuf_bytes = 0;
         pixel_count <= NUM_PIXELS;
         fifo_out_en <= 0;
     end else begin
-        outbuf = outbuf;
+        outbuf       = outbuf;
         outbuf_bytes = outbuf_bytes;
         fifo_out_en <= 0;
 
-        if (fifo_out_avail && outbuf_bytes < BYTES_PER_PIXEL && (!fifo_out_first_word || pixel_count >= NUM_PIXELS-1)) begin
+        if (fifo_out_avail && outbuf_bytes < BYTES_PER_PIXEL && (!fifo_out_first_word || pixel_count >= NUM_PIXELS - 1)) begin
             for (integer i = 0; i < BYTES_PER_PIXEL; i = i+1) begin
                 if (outbuf_bytes == i || (!i && fifo_out_first_word)) begin
-                    outbuf = (fifo_out_data << (8*i)) | (outbuf & ~(~0 << (8*i)));
-                    outbuf_bytes = MEM_DATA_WIDTH/8 + i;
+                    outbuf       = (fifo_out_data << (8 * i)) | (outbuf & ~(~0 << (8 * i)));
+                    outbuf_bytes = MEM_DATA_WIDTH / 8 + i;
                     fifo_out_en <= 1;
                 end
             end
@@ -286,111 +286,18 @@ begin
 
         if (pixel_rd) begin
             pixel_data <= outbuf;
-            if (outbuf_framestart || pixel_count > ((NUM_WORDS*(MEM_DATA_WIDTH/8) + BYTES_PER_PIXEL - 1) / BYTES_PER_PIXEL)) begin
+
+            if (outbuf_framestart || pixel_count > ((NUM_WORDS * (MEM_DATA_WIDTH / 8) + BYTES_PER_PIXEL - 1) / BYTES_PER_PIXEL)) begin
                 pixel_count <= 0;
             end else begin
                 pixel_count <= pixel_count + 1;
             end
 
-            outbuf_bytes = outbuf_bytes < BYTES_PER_PIXEL ? 0 : outbuf_bytes - BYTES_PER_PIXEL;
-            outbuf = outbuf >> (8*BYTES_PER_PIXEL);
+            outbuf_bytes      = outbuf_bytes < BYTES_PER_PIXEL ? 0 : outbuf_bytes - BYTES_PER_PIXEL;
+            outbuf            = outbuf >> (8 * BYTES_PER_PIXEL);
             outbuf_framestart = 0;
         end
     end
-end
-
-assign pixel_rd = out_axis_tready;
-assign out_axis_tvalid = pixel_count < NUM_PIXELS;
-assign out_axis_tdata = pixel_data;
-assign out_axis_tuser = !pixel_count;
-
-endmodule
-
-module fifo #(
-    parameter WIDTH = 8,
-    parameter DEPTH = 12,
-    parameter ABITS = 4
-) (
-    input  logic             in_clk,
-    input  logic             in_resetn,
-    input  logic             in_enable,
-    input  logic [WIDTH-1:0] in_data,
-    output logic [ABITS-1:0] in_free,
-
-    input  logic             out_clk,
-    input  logic             out_resetn,
-    input  logic             out_enable,
-    output logic [WIDTH-1:0] out_data,
-    output logic [ABITS-1:0] out_avail
-);
-
-logic [WIDTH-1:0] fifo [0:DEPTH-1];
-logic [ABITS-1:0] in_ptr, in_ptr_gray;
-logic [ABITS-1:0] out_ptr, out_ptr_gray;
-
-logic [ABITS-1:0] out_ptr_for_in_clk, in_ptr_for_out_clk;
-logic [ABITS-1:0] sync_in_ptr_0, sync_out_ptr_0;
-logic [ABITS-1:0] sync_in_ptr_1, sync_out_ptr_1;
-logic [ABITS-1:0] sync_in_ptr_2, sync_out_ptr_2;
-
-function [ABITS-1:0] bin2gray(input [ABITS-1:0] in);
-    logic [ABITS:0] temp;
-    begin
-        temp = in;
-        for (integer i = 0; i < ABITS; i++) begin
-            bin2gray[i] = ^temp[i +: 2];
-        end
-    end
-endfunction
-
-function [ABITS-1:0] gray2bin(input [ABITS-1:0] in);
-    begin
-        for (integer i = 0; i < ABITS; i++) begin
-            gray2bin[i] = ^(in >> i);
-        end
-    end
-endfunction
-
-always_ff @(posedge in_clk) begin
-    if (!in_resetn) begin
-        in_ptr <= 0;
-        in_ptr_gray <= 0;
-    end else begin
-        if (in_enable) begin
-            fifo[in_ptr] <= in_data;
-            in_ptr <= in_ptr + 1'b1;
-            in_ptr_gray <= bin2gray(in_ptr + 1'b1);
-        end
-    end
-
-    sync_out_ptr_0 <= out_ptr_gray;
-    sync_out_ptr_1 <= sync_out_ptr_0;
-    sync_out_ptr_2 <= sync_out_ptr_1;
-    out_ptr_for_in_clk <= gray2bin(sync_out_ptr_2);
-
-    in_free <= DEPTH - in_ptr + out_ptr_for_in_clk - 1;
-end
-
-always_ff @(posedge out_clk) begin
-    if (!out_resetn) begin
-        out_ptr <= 0;
-        out_ptr_gray <= 0;
-    end else begin
-        if (out_enable) begin
-            out_ptr <= out_ptr + 1'b1;
-            out_ptr_gray <= bin2gray(out_ptr + 1'b1);
-            out_data <= fifo[out_ptr + 1'b1];
-        end else begin
-            out_data <= fifo[out_ptr];
-        end
-    end
-
-    sync_in_ptr_0 <= in_ptr_gray;
-    sync_in_ptr_1 <= sync_in_ptr_0;
-    sync_in_ptr_2 <= sync_in_ptr_1;
-    in_ptr_for_out_clk <= gray2bin(sync_in_ptr_2);
-
-    out_avail <= in_ptr_for_out_clk - out_ptr;
 end
 
 endmodule

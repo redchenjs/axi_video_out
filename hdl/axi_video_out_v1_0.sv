@@ -151,17 +151,17 @@ svo_enc #(
     .out_axis_tuser(video_enc_tuser)
 );
 
-svo_tmds svo_tmds_0(
+svo_tmds svo_tmds_b(
     .clk(tmds_pclk),
     .resetn(tmds_pclk_rst_n),
     .de(!video_enc_tuser[3]),
     .ctrl(video_enc_tuser[2:1]),
-    .din(video_enc_tdata[23:16]),
+    .din(video_enc_tdata[7:0]),
     .dout({tmds_d9[0], tmds_d8[0], tmds_d7[0], tmds_d6[0], tmds_d5[0],
            tmds_d4[0], tmds_d3[0], tmds_d2[0], tmds_d1[0], tmds_d0[0]})
 );
 
-svo_tmds svo_tmds_1(
+svo_tmds svo_tmds_g(
     .clk(tmds_pclk),
     .resetn(tmds_pclk_rst_n),
     .de(!video_enc_tuser[3]),
@@ -171,12 +171,12 @@ svo_tmds svo_tmds_1(
            tmds_d4[1], tmds_d3[1], tmds_d2[1], tmds_d1[1], tmds_d0[1]})
 );
 
-svo_tmds svo_tmds_2(
+svo_tmds svo_tmds_r(
     .clk(tmds_pclk),
     .resetn(tmds_pclk_rst_n),
     .de(!video_enc_tuser[3]),
     .ctrl(2'b0),
-    .din(video_enc_tdata[7:0]),
+    .din(video_enc_tdata[23:16]),
     .dout({tmds_d9[2], tmds_d8[2], tmds_d7[2], tmds_d6[2], tmds_d5[2],
            tmds_d4[2], tmds_d3[2], tmds_d2[2], tmds_d1[2], tmds_d0[2]})
 );
