@@ -87,18 +87,15 @@ rst_syn tmds_pclk_rst_syn(
     .rst_n_o(tmds_pclk_rst_n)
 );
 
-svo_vdma #(
-    `SVO_PASS_PARAMS,
+video_dma #(
     .MEM_ADDR_WIDTH(32),
     .MEM_DATA_WIDTH(32),
     .MEM_BURST_LEN(256),
     .FIFO_DEPTH(512)
-) svo_vdma (
+) video_dma (
     .clk(m_axi_aclk),
     .oclk(tmds_pclk),
     .resetn(m_axi_aresetn),
-
-    .frame_irq(),
 
     .cfg_axi_awvalid(s_axi_awvalid),
     .cfg_axi_awready(s_axi_awready),
@@ -134,11 +131,7 @@ svo_vdma #(
     .out_axis_tvalid(mem_axis_tvalid),
     .out_axis_tready(mem_axis_tready),
     .out_axis_tdata(mem_axis_tdata),
-    .out_axis_tuser(mem_axis_tuser),
-
-    .term_axis_tvalid(),
-    .term_axis_tready(1'b0),
-    .term_axis_tdata()
+    .out_axis_tuser(mem_axis_tuser)
 );
 
 svo_enc #(
