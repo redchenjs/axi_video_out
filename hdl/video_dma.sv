@@ -112,6 +112,7 @@ always_ff @(posedge clk or negedge resetn)
 begin
     if (!resetn) begin
         reg_startaddr <= {32{1'b0}};
+        cfg_axi_rdata <= {32{1'b0}};
 
         cfg_axi_bvalid <= 1'b0;
         cfg_axi_rvalid <= 1'b0;
