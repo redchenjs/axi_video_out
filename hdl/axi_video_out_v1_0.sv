@@ -82,8 +82,8 @@ logic [2:0] tmds_d5, tmds_d6, tmds_d7, tmds_d8, tmds_d9;
 assign video_enc_tready = 1'b1;
 
 rst_syn tmds_pclk_rst_syn(
-    .clk_i(m_axi_aclk),
-    .rst_n_i(m_axi_aresetn),
+    .clk_i(s_axi_aclk),
+    .rst_n_i(s_axi_aresetn),
     .rst_n_o(tmds_pclk_rst_n)
 );
 
@@ -93,9 +93,9 @@ video_dma #(
     .MEM_BURST_LEN(256),
     .FIFO_DEPTH(512)
 ) video_dma (
-    .clk(m_axi_aclk),
+    .clk(s_axi_aclk),
     .oclk(tmds_pclk),
-    .resetn(m_axi_aresetn),
+    .resetn(s_axi_aresetn),
 
     .cfg_axi_awvalid(s_axi_awvalid),
     .cfg_axi_awready(s_axi_awready),
